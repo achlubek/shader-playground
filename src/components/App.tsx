@@ -12,10 +12,11 @@ import { parser } from "@lezer/cpp";
 import { githubDark } from "@uiw/codemirror-theme-github";
 import CodeMirror from "@uiw/react-codemirror";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import styled from "styled-components";
 import * as THREE from "three";
+import { Material } from "three";
 
 import { Renderer } from "@app/Renderer";
 import {
@@ -80,22 +81,11 @@ export default function App({
   const initFragmentShader = `varying vec2 iuv;
 uniform float time;
 uniform vec2 resolution;
+uniform vec2 mouse;
 
 void main() {
-    vec4 C = vec4(iuv.x, iuv.y, sin(time), 1.0);
-    if(iuv.x < 0.1){
-      C = vec4(0.0, 0.0, 1.0, 1.0);
-    }
-    if(iuv.y < 0.1){
-      C = vec4(0.0, 0.0, 1.0, 1.0);
-    }
-    if(iuv.x > 0.9){
-      C = vec4(0.0, 0.0, 1.0, 1.0);
-    }
-    if(iuv.y > 0.9){
-      C = vec4(0.0, 0.0, 1.0, 1.0);
-    }
-    gl_FragColor = C;
+  vec4 C = vec4(iuv.x, iuv.y, sin(time), 1.0);
+  gl_FragColor = C;
 }
   `;
 
@@ -104,6 +94,8 @@ void main() {
     useState(initFragmentShader);
   const [errors, setErrors] = useState("");
   const [showEditors, setShowEditors] = useState(true);
+
+  const geom = useMemo(() => new THREE.PlaneGeometry(2, 2), []);
 
   useEffect(() => {
     renderer.switchScene("quad");
@@ -127,14 +119,20 @@ void main() {
         depthTest: false,
       });
 
-      const oldQuad = renderer.scene.getObjectByName("quad");
+      const oldQuad = renderer.scene.getObjectByName("quadX");
       if (oldQuad) {
+        const material = oldQuad.userData.material as Material;
         renderer.scene.remove(oldQuad);
+        material.dispose();
       }
 
-      const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+      const quad = new THREE.Mesh(geom, mat);
+      quad.name = "quadX";
+      quad.userData = {
+        material: mat,
+      };
       renderer.scene.add(quad);
-      renderer.compile();
+      //renderer.compile();
 
       let mousePos = { x: 0.0, y: 0.0 };
       const mouseDrag = { x: 0.0, y: 0.0 };
@@ -177,11 +175,21 @@ void main() {
     };
   }, [fragmentShader]);
 
+  const saveAs = (): void => {
+    const element = document.createElement("a");
+    const file = new Blob([fragmentShader], {
+      type: "text/plain",
+    });
+    element.href = URL.createObjectURL(file);
+    element.download = `fragment-${new Date().toISOString()}.glsl`;
+    document.body.appendChild(element);
+    element.click();
+    element.remove();
+  };
+
   return (
     <>
-      <div
-        style={{ display: "flex", gap: baseGrid(2), marginBottom: baseGrid(2) }}
-      >
+      <div style={{ display: "flex", gap: baseGrid(2), margin: baseGrid(2) }}>
         <Button
           onClick={(e: React.MouseEvent) => {
             e.preventDefault();
@@ -192,14 +200,24 @@ void main() {
         </Button>
 
         {showEditors && (
-          <Button
-            onClick={(e: React.MouseEvent) => {
-              e.preventDefault();
-              setFragmentShader(fragmentShaderTemp);
-            }}
-          >
-            Compile
-          </Button>
+          <>
+            <Button
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault();
+                setFragmentShader(fragmentShaderTemp);
+              }}
+            >
+              Compile
+            </Button>
+            <Button
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault();
+                saveAs();
+              }}
+            >
+              Save As
+            </Button>
+          </>
         )}
       </div>
       {showEditors && (
@@ -208,6 +226,7 @@ void main() {
             value={fragmentShaderTemp}
             height="90vh"
             width="30vw"
+            indentWithTab={false}
             style={{ opacity: 0.9 }}
             theme={githubDark}
             extensions={[cpp()]}
@@ -220,6 +239,7 @@ void main() {
               value={errors}
               height="90vh"
               readOnly={true}
+              indentWithTab={false}
               width="30vw"
               style={{ opacity: 0.9 }}
               theme={githubDark}
@@ -234,12 +254,12 @@ void main() {
 
 const Button = styled.button`
   border-radius: ${standardBorderRadiusSmall};
-  border: 2px solid ${consts.colors.mainLead};
+  border: 1px solid ${consts.colors.mainLead};
   display: flex;
   align-items: center;
   justify-content: center;
   text-decoration: none;
-  background-color: transparent;
+  background-color: rgba(0, 0, 0, 0.3);
 
   height: ${baseGrid(11)};
 
