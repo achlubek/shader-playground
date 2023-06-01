@@ -21,12 +21,11 @@ export default defineConfig({
       },
     }),
     tsconfigPaths(),
-    basicSsl(),
   ],
   server: {
     cors: true,
     port: 3000,
-    https: true,
+    https: false,
     strictPort: true,
     host: "0.0.0.0",
   },
