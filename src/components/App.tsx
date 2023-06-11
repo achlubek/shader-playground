@@ -16,14 +16,21 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import styled from "styled-components";
 import * as THREE from "three";
-import { Material } from "three";
+import { Clock, Vector2 } from "three";
 
-import { Renderer } from "@app/Renderer";
+import useBackBufferHelper from "@app/hooks/render/helpers/useBackBufferHelper";
+import useFullScreenShaderPassHelper from "@app/hooks/render/helpers/useFullScreenShaderPassHelper";
+import useTextureOutputHelper from "@app/hooks/render/helpers/useTextureOutputHelper";
+import useCanvas from "@app/hooks/render/useCanvas";
+import useRender from "@app/hooks/render/useRender";
+import useRenderLoop from "@app/hooks/render/useRenderLoop";
+import useThreeRenderer from "@app/hooks/render/useThreeRenderer";
 import {
   baseGrid,
   consts,
   standardBorderRadiusSmall,
 } from "@app/styles/consts";
+import { verifyShader } from "@app/util/verifyShader";
 
 export const cppLanguage = LRLanguage.define({
   name: "cpp",
@@ -64,115 +71,134 @@ export function cpp(): LanguageSupport {
   return new LanguageSupport(cppLanguage);
 }
 
-export default function App({
-  renderer,
-}: {
-  renderer: Renderer;
-}): React.ReactElement {
+export default function App(): React.ReactElement {
   const vertexShader = `
-    varying vec2 iuv;
+    varying vec2 UV;
 
     void main() {
-        iuv = uv;
+        UV = uv;
         gl_Position = vec4(position, 1.0);
     }
   `;
 
-  const initFragmentShader = `varying vec2 iuv;
+  const initFragmentShader = `varying vec2 UV;
 uniform float time;
 uniform vec2 resolution;
 uniform vec2 mouse;
+uniform sampler2D bb;
 
 void main() {
-  vec4 C = vec4(iuv.x, iuv.y, sin(time), 1.0);
+  vec4 C = vec4(UV.x, sin(UV.y * 100.0 + time * 10.0), sin(time), 1.0);
+  C.rgb += 1.0 - step(0.2, distance(UV, mouse));
   gl_FragColor = C;
 }
   `;
 
+  const clock = useMemo(() => new Clock(), []);
+
+  const renderer = useThreeRenderer();
+
+  const render = useRender({
+    renderer,
+  });
+
+  const tmpRendererSize = renderer.getSize(new Vector2());
+
+  const backRenderer = useBackBufferHelper({
+    renderer,
+    width: tmpRendererSize.x,
+    height: tmpRendererSize.y,
+  });
+
+  const uniforms = useMemo(
+    () => ({
+      time: { value: clock.getElapsedTime() },
+      resolution: {
+        value: tmpRendererSize,
+      },
+      mouse: { value: new THREE.Vector2(0, 0) },
+      drag: { value: new THREE.Vector2(0, 0) },
+      zoom: { value: 1.0 },
+      ratio: { value: 1.0 },
+      bb: { value: backRenderer.getBackBuffer().texture },
+    }),
+    []
+  );
+
   const [fragmentShader, setFragmentShader] = useState(initFragmentShader);
   const [fragmentShaderTemp, setFragmentShaderTemp] =
     useState(initFragmentShader);
+
+  const stage = useFullScreenShaderPassHelper({
+    uniforms,
+    fragmentShader,
+  });
+
+  const output = useTextureOutputHelper({
+    render,
+    texture: backRenderer.getBackBuffer().texture,
+  });
+
+  const canvas = useCanvas({
+    renderer,
+    elementProps: {
+      onMouseMove: (e) => {
+        const rdrSize = renderer.getSize(new Vector2());
+        const newPos = new Vector2(e.clientX, e.clientY).divide(rdrSize);
+        const deltaPos = {
+          x: newPos.x - uniforms.mouse.value.x,
+          y: newPos.y - uniforms.mouse.value.y,
+        };
+        if (e.buttons === 1) {
+          uniforms.drag.value.x += deltaPos.x;
+          uniforms.drag.value.y += deltaPos.y;
+        }
+        uniforms.mouse.value = newPos.divide(rdrSize);
+      },
+      onWheel: (e) => {
+        uniforms.zoom.value -= e.deltaY * 0.001;
+      },
+      style: {
+        position: "absolute",
+        inset: 0,
+        zIndex: -2,
+      },
+    },
+  });
+
+  useRenderLoop(() => {
+    canvas.update();
+    uniforms.time.value = clock.getElapsedTime();
+    const canvasSize = renderer.getSize(new Vector2());
+    uniforms.resolution.value = new Vector2(canvasSize.x, canvasSize.y);
+    uniforms.ratio.value = canvasSize.x / canvasSize.y;
+    uniforms.bb.value = backRenderer.getBackBuffer().texture;
+    stage.setUniforms(uniforms);
+
+    render({
+      target: backRenderer.getTarget(),
+      scene: stage.scene,
+      camera: stage.camera,
+    });
+    backRenderer.toggleState();
+
+    render({
+      target: null,
+      scene: output.scene,
+      camera: output.camera,
+    });
+  });
+
   const [errors, setErrors] = useState("");
   const [showEditors, setShowEditors] = useState(true);
 
-  const geom = useMemo(() => new THREE.PlaneGeometry(2, 2), []);
-
   useEffect(() => {
-    renderer.switchScene("quad");
-    const resolution = renderer.getResolution();
-
     try {
-      renderer.verifyShaderProgram(vertexShader, fragmentShader);
-      const mat = new THREE.ShaderMaterial({
-        uniforms: {
-          time: { value: renderer.getElapsedTime() },
-          resolution: {
-            value: new THREE.Vector2(resolution[0], resolution[1]),
-          },
-          mouse: { value: new THREE.Vector2(0, 0) },
-          drag: { value: new THREE.Vector2(0, 0) },
-          zoom: { value: 1.0 },
-        },
-        vertexShader,
-        fragmentShader: fragmentShader,
-        depthWrite: false,
-        depthTest: false,
-      });
-
-      const oldQuad = renderer.scene.getObjectByName("quadX");
-      if (oldQuad) {
-        const material = oldQuad.userData.material as Material;
-        renderer.scene.remove(oldQuad);
-        material.dispose();
-      }
-
-      const quad = new THREE.Mesh(geom, mat);
-      quad.name = "quadX";
-      quad.userData = {
-        material: mat,
-      };
-      renderer.scene.add(quad);
-      //renderer.compile();
-
-      let mousePos = { x: 0.0, y: 0.0 };
-      const mouseDrag = { x: 0.0, y: 0.0 };
-      let zoom = 1;
-      window.addEventListener("wheel", (event) => {
-        zoom -= event.deltaY * 0.001;
-      });
-
-      window.addEventListener("mousemove", (event) => {
-        const newPos = { x: event.clientX, y: event.clientY };
-        const deltaPos = { x: newPos.x - mousePos.x, y: newPos.y - mousePos.y };
-        if (event.buttons === 1) {
-          mouseDrag.x += deltaPos.x;
-          mouseDrag.y += deltaPos.y;
-        }
-        mousePos = newPos;
-      });
-      renderer.scene.onDraw = () => {
-        mat.uniforms.time.value = renderer.getElapsedTime();
-        mat.uniforms.zoom.value = zoom;
-        mat.uniforms.resolution.value = new THREE.Vector2(
-          resolution[0],
-          resolution[1]
-        );
-        mat.uniforms.mouse.value = new THREE.Vector2(
-          mousePos.x / resolution[0],
-          mousePos.y / resolution[1]
-        );
-        mat.uniforms.drag.value = new THREE.Vector2(
-          mouseDrag.x / resolution[0],
-          mouseDrag.y / resolution[1]
-        );
-      };
+      verifyShader(renderer, vertexShader, fragmentShader);
       setErrors("");
     } catch (e) {
       setErrors((e as Error).message);
     }
-    return () => {
-      renderer.scene.onDraw = undefined;
-    };
   }, [fragmentShader]);
 
   const saveAs = (): void => {
@@ -188,7 +214,8 @@ void main() {
   };
 
   return (
-    <>
+    <div style={{ position: "relative" }}>
+      {canvas.element}
       <div style={{ display: "flex", gap: baseGrid(2), margin: baseGrid(2) }}>
         <Button
           onClick={(e: React.MouseEvent) => {
@@ -248,7 +275,7 @@ void main() {
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
