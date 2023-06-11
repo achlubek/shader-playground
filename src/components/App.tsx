@@ -89,8 +89,8 @@ uniform sampler2D bb;
 
 void main() {
   vec4 C = vec4(UV.x, sin(UV.y * 100.0 + time * 10.0), sin(time), 1.0);
-  C.rgb += 1.0 - step(0.2, distance(UV, mouse));
-  gl_FragColor = C;
+  C.rgb += 1.0 - step(0.02, distance(UV, mouse));
+  gl_FragColor = vec4(mix(C.rgb, texture(bb, UV).rgb, 0.8), 1.0);
 }
   `;
 
@@ -142,19 +142,6 @@ void main() {
   const canvas = useCanvas({
     renderer,
     elementProps: {
-      onMouseMove: (e) => {
-        const rdrSize = renderer.getSize(new Vector2());
-        const newPos = new Vector2(e.clientX, e.clientY).divide(rdrSize);
-        const deltaPos = {
-          x: newPos.x - uniforms.mouse.value.x,
-          y: newPos.y - uniforms.mouse.value.y,
-        };
-        if (e.buttons === 1) {
-          uniforms.drag.value.x += deltaPos.x;
-          uniforms.drag.value.y += deltaPos.y;
-        }
-        uniforms.mouse.value = newPos.divide(rdrSize);
-      },
       onWheel: (e) => {
         uniforms.zoom.value -= e.deltaY * 0.001;
       },
@@ -214,7 +201,24 @@ void main() {
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{ position: "relative", height: "100vh" }}
+      onMouseMove={(e) => {
+        const rdrSize = renderer.getSize(new Vector2());
+        const newPos = new Vector2(e.clientX, e.clientY).divide(rdrSize);
+        newPos.y = 1.0 - newPos.y;
+        const deltaPos = {
+          x: newPos.x - uniforms.mouse.value.x,
+          y: newPos.y - uniforms.mouse.value.y,
+        };
+        if (e.buttons === 1) {
+          uniforms.drag.value.x += deltaPos.x;
+          uniforms.drag.value.y += deltaPos.y;
+        }
+        uniforms.mouse.value = newPos;
+        console.log(uniforms.mouse.value);
+      }}
+    >
       {canvas.element}
       <div style={{ display: "flex", gap: baseGrid(2), margin: baseGrid(2) }}>
         <Button
