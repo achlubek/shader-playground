@@ -13,24 +13,26 @@ import { githubDark } from "@uiw/codemirror-theme-github";
 import CodeMirror from "@uiw/react-codemirror";
 
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  useBackBufferHelper,
+  useCanvas,
+  useFullScreenShaderPassHelper,
+  useRender,
+  useRenderLoop,
+  useTextureOutputHelper,
+  useThreeRenderer,
+  verifyShader,
+} from "react-three-hook";
 
 import styled from "styled-components";
 import * as THREE from "three";
 import { Clock, Vector2 } from "three";
 
-import useBackBufferHelper from "@app/hooks/render/helpers/useBackBufferHelper";
-import useFullScreenShaderPassHelper from "@app/hooks/render/helpers/useFullScreenShaderPassHelper";
-import useTextureOutputHelper from "@app/hooks/render/helpers/useTextureOutputHelper";
-import useCanvas from "@app/hooks/render/useCanvas";
-import useRender from "@app/hooks/render/useRender";
-import useRenderLoop from "@app/hooks/render/useRenderLoop";
-import useThreeRenderer from "@app/hooks/render/useThreeRenderer";
 import {
   baseGrid,
   consts,
   standardBorderRadiusSmall,
 } from "@app/styles/consts";
-import { verifyShader } from "@app/util/verifyShader";
 
 export const cppLanguage = LRLanguage.define({
   name: "cpp",
